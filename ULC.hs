@@ -119,7 +119,7 @@ rep' term (y:ys) ctxt =
 rep term ctxt = rep' term (freeVars term) ctxt
 
 main =do
-  ctxt <- newIORef []
+  ctxt <- newIORef loadLib
   forever $ do
   putStr ">> "
   s <- getLine
@@ -130,8 +130,8 @@ main =do
           c <- readIORef ctxt          
           uprint $ pp $ eval $ rep e c
         Assign i e -> do
-          modifyIORef ctxt (addCtxt i e)
-          printCtxt ctxt
+          c <- readIORef ctxt
+          writeIORef ctxt (addCtxt i (eval $ rep e c) c)
     Nothing -> putStrLn "Parse Error"
   
 
@@ -194,7 +194,21 @@ eval t1 = eval $ cbv t1
 
 
 
+-- stdlib
+lib = [
+  ("true", "(x -> (y -> x))"),
+  ("false","(x -> (y -> y))"),
+  ("if"  , "(x -> (y -> (z -> x y z)))"),
+  ("and" , "(x -> (y -> x y false))"),
+  ("pair", "(f -> (s -> (b -> b f s)))"),
+  ("fst" , "(p -> p true)"),
+  ("snd" , "(p -> p false)")
+  ]
 
+
+loadLib' = map (\p -> (fst p, runParser expr $ snd p)) lib
+loadLib  = map (\p -> (fst p, rep (snd p) loadLib')) loadLib'
+--loadLib ctxt = foldr (++) ctxt $ map (\s -> fst (runParser expr s)) lib  
 
 t1 = "(x -> x)(y -> y)(z -> z)"
 true = "(x -> (y -> x))"
