@@ -1,6 +1,7 @@
 module ULC where
 import MonadicParser
 import Data.Char
+import Data.IORef
 import Control.Monad
 import Control.Applicative
 import Text.Show.Unicode
@@ -15,7 +16,8 @@ import Text.Show.Unicode
 data Term = Abs Term Term
           | App Term Term
           | Lit String deriving Show
-          
+
+data Cmd = Eval Term | Assign String Term deriving Show
 --Parsers
 {-
 BKN rules:
@@ -59,11 +61,79 @@ expr = chainl1 (do t <- lam; spaces; return t) (pure App)
 inr :: Parser (Term)
 inr = chainl1 (do t<-term; spaces; return t) (pure App)
 
+assign :: Parser (Cmd)
+assign = do
+  (Lit i) <- iden
+  spaces
+  reserved "="
+  spaces
+  e <- inr -- expr
+  return (Assign i e)
 
-main = forever $ do
+cmd :: Parser (Cmd)
+cmd = assign
+--expr
+  <|> (do e <- inr; return (Eval e))
+
+
+execParser :: Parser a -> String -> Maybe a
+execParser p s =
+  case parse p s of
+    [(res,[])] -> Just res
+    _ -> Nothing
+
+
+printCtxt :: IORef [(String,Term)] -> IO ()
+printCtxt ctxt = do
+  l <- readIORef ctxt
+  putStrLn $ show l
+
+addCtxt :: String -> Term -> [(String,Term)] -> [(String,Term)]
+addCtxt key val ctxt = ctxt ++ [(key,val)]
+
+clookup x [] = error "empty lookup"
+clookup x (y:ys) =
+  if x == (fst y)
+  then snd y
+  else clookup x ys
+
+inCtxt x [] = False
+inCtxt x (y:ys)=
+  if x == (fst y)
+  then True
+  else inCtxt x ys
+    
+
+findAndReplace x (Lit y) ctxt =
+  if x == y && inCtxt x ctxt
+  then clookup x ctxt
+  else (Lit y)
+findAndReplace x (App t1 t2) ctxt =
+  (App (findAndReplace x t1 ctxt) (findAndReplace x t2 ctxt))
+findAndReplace x (Abs i t) ctxt =
+  (Abs i (findAndReplace x t ctxt))
+
+rep' term [] ctxt = term
+rep' term (y:ys) ctxt =
+  rep' (findAndReplace y term ctxt) ys ctxt
+rep term ctxt = rep' term (freeVars term) ctxt
+
+main =do
+  ctxt <- newIORef []
+  forever $ do
   putStr ">> "
   s <- getLine
-  uprint $ pp $ eval $  runParser expr s
+  case execParser cmd s of
+    Just res ->
+      case res of
+        Eval e -> do
+          c <- readIORef ctxt          
+          uprint $ pp $ eval $ rep e c
+        Assign i e -> do
+          modifyIORef ctxt (addCtxt i e)
+          printCtxt ctxt
+    Nothing -> putStrLn "Parse Error"
+  
 
 -- C-x 8 RET   03bb
 pp :: Term -> String
@@ -120,7 +190,12 @@ eval (Abs i b) = (Abs i b)
 eval (Lit x) = (Lit x)
 eval t1 = eval $ cbv t1
 
-p = runParser expr
+
+
+
+
+
+
 t1 = "(x -> x)(y -> y)(z -> z)"
 true = "(x -> (y -> x))"
 false = "(x -> (y -> y))"
